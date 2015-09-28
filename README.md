@@ -6,8 +6,8 @@ Created by Libo Wang on 9/24/2015. Targeting alphadata board
 # Implementation plan
 
 - Organize test input.
-- Create testbench and invoke zlib. 
-- Only include huffman encoding and DATAFLOW.
+- Create testbench and invoke zlib.
+- Only include huffman encoding and DATAFLOW directive.
 - Perform hardware execution of huffman encoding compressor.
 - Add LZ77 incrementally and test hardware.
 
