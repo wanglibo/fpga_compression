@@ -16,7 +16,7 @@
 
 #define CHUNK 64*1024
 
-#define DO_VERIFY 0
+#define DO_VERIFY 1
 
 int64_t get_time_us( void ) {
 #if 0

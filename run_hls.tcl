@@ -23,8 +23,10 @@ create_clock -period 6ns
 csim_design
 
 csynth_design
+
 #cosim_design -bc;#-trace_level all
 #cosim_design -bc
+
 cosim_design
 #export_design -evaluate verilog
 
