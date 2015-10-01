@@ -551,8 +551,8 @@ unsigned short dtree[60] = {
   *out_buf = *((uint128*)(out_buf1));
   *outl_buf = *((uint128*)(outl_buf1));
 #else
-  *out_buf = ints2vec_t(out_buf1);
-  *outl_buf = ints2vec_t(outl_buf1);
+  *out_buf = uint32_to_uint128(out_buf1);
+  *outl_buf = uint32_to_uint128(outl_buf1);
 #endif
 }
 

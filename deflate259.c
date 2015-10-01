@@ -61,9 +61,9 @@ static uint512 input_b[1024];  // 64 KB, input upper bound
 static uint512 output_b[2048]; // 128 KB, output upper bound
 static uint512 tree_b[4];      // A huffman tree cannot exceed 64 * 4 bytes.
 #else
-static vec_t input_b[1024*4];  // 64 KB, input upper bound
-static vec2_t  output_b[2048*2]; // 128 KB, output upper bound
-static vec2_t tree_b[4*2];      // A huffman tree cannot exceed 64 * 4 bytes.
+static vec_t input_b[1024*64/VEC];  // 64 KB, input upper bound
+static vec2_t output_b[1024*128/(2*VEC)]; // 128 KB, output upper bound
+static vec2_t tree_b[4*64/(2*VEC)];      // A huffman tree cannot exceed 64 * 4 bytes.
 #endif
 
 void max_reduction(unsigned short input[VEC], unsigned short *max, 
@@ -287,6 +287,7 @@ void deflate259(uint512* input, unsigned* in_len_p0, uint512* tree,
   unsigned tree_bytes_floor = tree_len / 8;
   unsigned tree_bytes_ceil = (tree_len + 7) / 8;
 
+  // input batch count
   unsigned input_b_count = (in_len + 63) / 64;
   unsigned tree_b_count = (tree_bytes_ceil + 63) / 64;
 
@@ -304,21 +305,24 @@ void deflate259(uint512* input, unsigned* in_len_p0, uint512* tree,
   for (i=0; i<input_b_count; i++)
   {
 #pragma HLS pipeline
+     int j;
      tmp512 = input[i];
-
-     input_b[4*i]   = apint_get_range(tmp512, 127, 0);
-     input_b[4*i+1] = apint_get_range(tmp512, 255, 128);
-     input_b[4*i+2] = apint_get_range(tmp512, 383, 256);
-     input_b[4*i+3] = apint_get_range(tmp512, 511, 384);
+     for (j=0; j<64/VEC; j++) {
+       input_b[(64/VEC)*i+j] = apint_get_range(tmp512, (j+1)*8*VEC-1, j*8*VEC);
+     }
   }
 
   for (i=0; i<tree_b_count; i++)
-  {     
+  {
+     int j;
 #pragma HLS pipeline
      tmp512 = tree[i];
-
-     tree_b[2*i]   = apint_get_range(tmp512, 255, 0);
-     tree_b[2*i+1] = apint_get_range(tmp512, 511, 256);
+     for (j=0; j<64/(2*VEC); j++) {
+       tree_b[(64/(2*VEC)*i+j)] =
+           apint_get_range(tmp512, (j+1)*16*VEC-1, j*16*VEC);
+     }
+     //tree_b[2*i]   = apint_get_range(tmp512, 255, 0);
+     //tree_b[2*i+1] = apint_get_range(tmp512, 511, 256);
   }
 
   vec_t* input_v = input_b;
@@ -551,18 +555,18 @@ void deflate259(uint512* input, unsigned* in_len_p0, uint512* tree,
       if (input_pos0 + i < in_len && ldvalid[i]) {
 //        *((uint128*)hcode_rp32) = hcode_r[i];
 //        *((uint128*)hlen_rp32) = hlen_r[i];
-        vec_t2ints(hcode_rp32, hcode_r[i]);
-        vec_t2ints(hlen_rp32, hlen_r[i]);
+        uint128_to_uint32(hcode_rp32, hcode_r[i]);
+        uint128_to_uint32(hlen_rp32, hlen_r[i]);
       } else if (input_pos0 + i == in_len) {
 //        *((uint128*)hcode_rp32) = hcode_256;
 //        *((uint128*)hlen_rp32) = hlen_256;
-        vec_t2ints(hcode_rp32, hcode_256);
-        vec_t2ints(hlen_rp32, hlen_256);
+        uint128_to_uint32(hcode_rp32, hcode_256);
+        uint128_to_uint32(hlen_rp32, hlen_256);
       } else {
 //        *((uint128*)hcode_rp32) = 0;
 //        *((uint128*)hlen_rp32) = 0;
-        vec_t2ints(hcode_rp32, 0);
-        vec_t2ints(hlen_rp32, 0);
+        uint128_to_uint32(hcode_rp32, 0);
+        uint128_to_uint32(hlen_rp32, 0);
       }
 
       for (j=0; j<4; j++) {
@@ -748,9 +752,13 @@ void deflate259(uint512* input, unsigned* in_len_p0, uint512* tree,
   {
 #pragma HLS pipeline
      vec2_t tmpvec2;
-
-     tmp512   = apint_set_range(tmp512, 255, 0, output_b[2*i]);
-     tmp512   = apint_set_range(tmp512, 511, 256, output_b[2*i+1]);
+     int j;
+     for (j=0; j<64/(2*VEC); j++) {
+       tmp512 = apint_set_range(tmp512, (j+1)*16*VEC-1, j*16*VEC,
+           output_b[(64/(2*VEC))*i+j]);
+     }
+     //tmp512   = apint_set_range(tmp512, 255, 0, output_b[2*i]);
+     //tmp512   = apint_set_range(tmp512, 511, 256, output_b[2*i+1]);
      output[i] = tmp512;
   }
 #endif

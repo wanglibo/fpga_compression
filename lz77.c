@@ -9,7 +9,6 @@
 #include <stdio.h>
 #include "constant.h"
 #include <string.h>
-#define BANK_OFFSETS (HASH_TABLE_SIZE/HASH_TABLE_BANKS)
 
 #ifdef BANK_OFFSETS
 static vec_t hash_content[BANK_OFFSETS][HASH_TABLE_BANKS];
@@ -88,6 +87,26 @@ vec2_t short2vec2_t(unsigned short* src)
     return dst;
 } 
 
+uint128 uint32_to_uint128(unsigned src[4]) {
+  int j;
+  uint128 dst;
+#pragma HLS inline
+  for (j=0; j<4; j++) {
+#pragma HLS unroll
+    dst = apint_set_range(dst, (j+1)*32-1, j*32, src[j]);
+  }
+  return dst;
+}
+
+void uint128_to_uint32(unsigned dst[4], uint128 src) {
+  int j;
+#pragma HLS inline
+  for (j=0; j<4; j++) {
+#pragma HLS unroll
+    dst[j] = apint_get_range(src, (j+1)*32-1, j*32);
+  }
+}
+
 void min_reduction(unsigned short input[VEC], unsigned short *max, 
   unsigned short *max_i)
 {
@@ -122,6 +141,7 @@ void min_reduction(unsigned short input[VEC], unsigned short *max,
     }
   }
 */
+#if VEC>=16
 #if VEC==32
   for (i=0; i<16; i++) {
     unsigned short l, r, li, ri;
@@ -170,6 +190,14 @@ void min_reduction(unsigned short input[VEC], unsigned short *max,
   } else {
     maxv = red2[0]; maxi = red2i[0];
   }
+#else
+  for (i=0; i<VEC; i++) {
+    if (i==0 || input[i] < maxv) {
+      maxv = input[i];
+      maxi = i;
+    }
+  }
+#endif
   *max = maxv; *max_i = maxi;
 }
 
@@ -206,7 +234,7 @@ unsigned short calc_match_len(unsigned char input[VEC], unsigned char record[VEC
 #pragma HLS ARRAY_PARTITION variable=input complete
 #pragma HLS ARRAY_PARTITION variable=record complete
 */
-/*
+#if VEC==8
   unsigned match_len, mismatch, i;
   match_len = 0;
   mismatch = 0;
@@ -215,7 +243,7 @@ unsigned short calc_match_len(unsigned char input[VEC], unsigned char record[VEC
     else mismatch = 1;
   }
   return match_len;
-*/
+#else
   unsigned short match_id[VEC];
 #pragma HLS ARRAY_PARTITION variable=match_id complete
   unsigned char i;
@@ -229,113 +257,7 @@ unsigned short calc_match_len(unsigned char input[VEC], unsigned char record[VEC
     maxi = VEC;
   }
   return maxi;
-}
-
-void analyze_conflict(
-  unsigned short bank_num[VEC],
-  unsigned short bank_num1[VEC],
-  unsigned short bank_offset[HASH_TABLE_BANKS],
-  unsigned short bank_occupied[HASH_TABLE_BANKS],
-  unsigned short hash_v[VEC],
-  vec_t updates[HASH_TABLE_BANKS],
-  unsigned char current[VEC][VEC])
-{
-  unsigned short i, j;
-  // Analyze bank conflict profile and avoid conflicted access
-  for (i=0; i<VEC; i++) {
-    for (j=0; j<VEC; j++) {
-      if (j > i && bank_num[j] == bank_num[i]) {
-        bank_num[j] = HASH_TABLE_BANKS; // set to invalid bank number
-      }
-    }
-  }
-
-  for (j=0; j<HASH_TABLE_BANKS; j++) {
-    for (i=0; i<VEC; i++) {
-      if (bank_num[i] == j) {
-        bank_offset[j] = hash_v[i] / HASH_TABLE_BANKS;
-        bank_occupied[j] = i;
-      }
-    }
-  }
-  // Prepare update line for the hash table
-  for (i=0; i<HASH_TABLE_BANKS; i++) {
-    unsigned char pos = bank_occupied[i];
-    unsigned char real_pos;
-    unsigned char update[VEC];
-#pragma HLS ARRAY_PARTITION variable=update complete
-    real_pos = pos;
-    if (pos == VEC) pos = 0;
-    for (j=0; j<VEC; j++) {
-      update[j] = current[pos][j];
-    }
-    if (real_pos != VEC) {
-      updates[i] = *((vec_t*)update);
-    } else {
-      updates[i] = 0;
-    }
-  }
-}
-
-void hash_rw(
-  unsigned input_pos,
-  vec_t updates[HASH_TABLE_BANKS],
-  unsigned short bank_occupied[HASH_TABLE_BANKS],
-  unsigned short bank_offset[HASH_TABLE_BANKS],
-  unsigned short bank_num1[VEC],
-  vec_t match_results[VEC],
-  unsigned match_positions[VEC],
-  unsigned char match_valid[VEC]) 
-{
-  unsigned i, j;
-  vec_t match_candidates[HASH_TABLE_BANKS];
-  unsigned match_positions_c[HASH_TABLE_BANKS];
-  unsigned char match_valid_c[HASH_TABLE_BANKS];
-#pragma HLS ARRAY_PARTITION variable=match_candidates complete
-#pragma HLS ARRAY_PARTITION variable=match_positions_c complete
-#pragma HLS ARRAY_PARTITION variable=match_valid_c complete
-  // Perform conflict free memory access from all the banks
-  for (j=0; j<HASH_TABLE_BANKS; j++) {
-    unsigned char pos = bank_occupied[j];
-    if (pos != VEC) {
-#ifdef BANK_OFFSETS
-      match_candidates[j] = hash_content[bank_offset[j]][j];
-      match_positions_c[j] = hash_position[bank_offset[j]][j];
-      match_valid_c[j] = hash_valid[bank_offset[j]][j];
-#else
-      match_candidates[j] = hash_content[bank_offset[j]*HASH_TABLE_BANKS+j];
-      match_positions_c[j] = hash_position[bank_offset[j]*HASH_TABLE_BANKS+j];
-      match_valid_c[j] = hash_valid[bank_offset[j]*HASH_TABLE_BANKS+j];
 #endif
-    } else {
-      match_valid_c[j] = 0;
-    }
-  }
-
-  // Perform hash table update
-  for (j=0; j<HASH_TABLE_BANKS; j++) {
-    unsigned char pos = bank_occupied[j];
-    if (pos != VEC) {
-#ifdef BANK_OFFSETS
-      hash_content[bank_offset[j]][j] = updates[j];
-      hash_position[bank_offset[j]][j] = input_pos + pos;
-      hash_valid[bank_offset[j]][j] = 1;
-#else
-      hash_content[bank_offset[j]*HASH_TABLE_BANKS+j] = updates[j];
-      hash_position[bank_offset[j]*HASH_TABLE_BANKS+j] = input_pos + pos;
-      hash_valid[bank_offset[j]*HASH_TABLE_BANKS+j] = 1;
-#endif
-    }
-  }
-
-  // Gather match results from correct banks.
-  // Now match_result[i][j] is the potential match for string current[j] in
-  // dictionaty i.
-  for (j=0; j<VEC; j++) { 
-    match_results[j] = match_candidates[bank_num1[j]];
-    match_positions[j] = match_positions_c[bank_num1[j]];
-    match_valid[j] = match_valid_c[bank_num1[j]];
-  }
 }
 
 // Return raw string match result based on dictionary lookup, and also
@@ -509,24 +431,6 @@ void match_window(unsigned char data_window[2*VEC], unsigned input_pos,
     match_positions[j] = match_positions_c[bank_num1[j]];
     match_valid[j] = match_valid_c[bank_num1[j]];
   }
-
-/*
-  analyze_conflict(
-      bank_num,
-      bank_num1,
-      bank_offset,
-      bank_occupied,
-      hash_v,
-      updates,
-      current);
-  hash_rw(input_pos, updates, 
-      bank_occupied,
-      bank_offset,
-      bank_num1,
-      match_results,
-      match_positions,
-      match_valid);
-*/
 
   // For each substring in the window do parallel matching and 
   // LZ77 encoding

@@ -1,44 +1,22 @@
-// Modified by Libo Wang for testing FPGA deflate implementation. OpenCL
+// Created by Libo Wang for testing FPGA deflate implementation. OpenCL
 // wrapper created on 6/11/15.
-
-/* zpipe.c: example of proper use of zlib's inflate() and deflate()
-   Not copyrighted -- provided to the public domain
-   Version 1.4  11 December 2005  Mark Adler */
-
-/* Version history:
-   1.0  30 Oct 2004  First version
-   1.1   8 Nov 2004  Add void casting for unused return values
-                     Use switch statement for inflate() return values
-   1.2   9 Nov 2004  Add assertions to document zlib guarantees
-   1.3   6 Apr 2005  Remove incorrect assertion in inf()
-   1.4  11 Dec 2005  Add hack to avoid MSDOS end-of-line conversions
-                     Avoid some compiler warnings for input and output buffers
- */
 
 #include <stdio.h>
 #include <string.h>
 #include <assert.h>
 #include <stdlib.h>
-#include "zlib.h"
 #include <math.h> // performance analysis
 #include <sys/time.h>
 #include <stdint.h>
-//#define SDACCEL_HOST
 #ifdef SDACCEL_HOST
 #include <CL/opencl.h>
 #else
 #include "constant.h"
 #endif
 
-#if defined(MSDOS) || defined(OS2) || defined(WIN32) || defined(__CYGWIN__)
-#  include <fcntl.h>
-#  include <io.h>
-#  define SET_BINARY_MODE(file) setmode(fileno(file), O_BINARY)
-#else
-#  define SET_BINARY_MODE(file)
-#endif
-
 #define CHUNK 64*1024
+
+#define DO_VERIFY 0
 
 int64_t get_time_us( void ) {
 #if 0
@@ -50,198 +28,6 @@ int64_t get_time_us( void ) {
 #endif
 }
 
-#if 0
-/* Compress from file source to file dest until EOF on source.
-   def() returns Z_OK on success, Z_MEM_ERROR if memory could not be
-   allocated for processing, Z_STREAM_ERROR if an invalid compression
-   level is supplied, Z_VERSION_ERROR if the version of zlib.h and the
-   version of the library linked do not match, or Z_ERRNO if there is
-   an error reading or writing the files. */
-int def(FILE *source, FILE *dest, int level)
-{
-    int ret, flush;
-    unsigned have;
-    z_stream strm;
-    unsigned char in[CHUNK];
-    unsigned char out[CHUNK];
-
-    int64_t start, end;
-    start = get_time_us();
-
-    /* allocate deflate state */
-    strm.zalloc = Z_NULL;
-    strm.zfree = Z_NULL;
-    strm.opaque = Z_NULL;
-#define DEF_MEM_LEVEL 8
-    // -MAX_WBITS produces raw stream
-    ret = deflateInit2(&strm, level, Z_DEFLATED, -MAX_WBITS, DEF_MEM_LEVEL, 
-                       Z_DEFAULT_STRATEGY);
-    if (ret != Z_OK)
-        return ret;
-
-    int bytes = 0;
-    int bytesOut = 0;
-
-    /* compress until end of file */
-    do {
-        strm.avail_in = fread(in, 1, CHUNK, source);
-        bytes += strm.avail_in;
-        if (ferror(source)) {
-            (void)deflateEnd(&strm);
-            return Z_ERRNO;
-        }
-        flush = feof(source) ? Z_FINISH : Z_NO_FLUSH;
-        strm.next_in = in;
-
-        /* run deflate() on input until output buffer not full, finish
-           compression if all of source has been read in */
-        do {
-            strm.avail_out = CHUNK;
-            strm.next_out = out;
-            ret = deflate(&strm, flush);    /* no bad return value */
-            assert(ret != Z_STREAM_ERROR);  /* state not clobbered */
-            have = CHUNK - strm.avail_out;
-            if (fwrite(out, 1, have, dest) != have || ferror(dest)) {
-                (void)deflateEnd(&strm);
-                return Z_ERRNO;
-            } else {
-//                fprintf(stderr, "Output %d bytes\n", have);
-            }
-            bytesOut += have;
-        } while (strm.avail_out == 0);
-        assert(strm.avail_in == 0);     /* all input will be used */
-
-        /* done when last data in file processed */
-    } while (flush != Z_FINISH);
-    assert(ret == Z_STREAM_END);        /* stream will be complete */
-
-    /* clean up and return */
-    (void)deflateEnd(&strm);
-
-    // Stop the timer and calculate throughput
-    end = get_time_us();
-#define PERFORMANCE_DUMP
-#ifdef PERFORMANCE_DUMP
-    float elapsed = (float)(end-start)/1000000.0;
-    fprintf(stderr, "======================\n");
-    fprintf(stderr, "Input size: %d bytes (%f MB)\n", bytes, (float)1.0*bytes/1024/1024);
-    fprintf(stderr, "Output size: %d bytes (%f MB)\n", bytesOut, (float)1.0*bytesOut/1024/1024);
-    fprintf(stderr, "Compression ratio: %f\n", (float)1.0*bytes/bytesOut);
-    fprintf(stderr, "Elapsed time: %f seconds\n", elapsed);
-    fprintf(stderr, "Throughput: %f MB/s\n", (float)1.0*bytes/1024/1024/elapsed);
-#endif
-    return Z_OK;
-}
-#endif
-
-/* Decompress from file source to file dest until stream ends or EOF.
-   inf() returns Z_OK on success, Z_MEM_ERROR if memory could not be
-   allocated for processing, Z_DATA_ERROR if the deflate data is
-   invalid or incomplete, Z_VERSION_ERROR if the version of zlib.h and
-   the version of the library linked do not match, or Z_ERRNO if there
-   is an error reading or writing the files. */
-//int inf(FILE *source, FILE *dest)
-#if 0
-int inf_buf(unsigned char *source, unsigned in_len, unsigned char *dest, 
-    unsigned *out_len)
-{
-    int ret;
-    unsigned have;
-    z_stream strm;
-    unsigned char in[CHUNK];
-    unsigned char out[CHUNK];
-
-    /* allocate inflate state */
-    strm.zalloc = Z_NULL;
-    strm.zfree = Z_NULL;
-    strm.opaque = Z_NULL;
-    strm.avail_in = 0;
-    strm.next_in = Z_NULL;
-    // TODO: take raw input stream
-    //ret = inflateInit(&strm);
-    ret = inflateInit2(&strm, -MAX_WBITS);
-    if (ret != Z_OK)
-        return ret;
-    unsigned in_pos = 0;
-    unsigned out_pos = 0;
-
-    /* decompress until deflate stream ends or end of file */
-    do {
-        if (in_pos + CHUNK < in_len) {
-          strm.avail_in = CHUNK;
-        } else {
-          strm.avail_in = in_len - in_pos;
-        }
-        //strm.avail_in = fread(in, 1, CHUNK, source);
-        //if (ferror(source)) {
-        //    (void)inflateEnd(&strm);
-        //    return Z_ERRNO;
-        //}
-        if (strm.avail_in == 0)
-            break;
-        memcpy((void*)in, (void*)(source + in_pos), CHUNK);
-        in_pos += strm.avail_in;
-        strm.next_in = in;
-
-        /* run inflate() on input until output buffer not full */
-        do {
-            strm.avail_out = CHUNK;
-            strm.next_out = out;
-            ret = inflate(&strm, Z_NO_FLUSH);
-            assert(ret != Z_STREAM_ERROR);  /* state not clobbered */
-            switch (ret) {
-            case Z_NEED_DICT:
-                ret = Z_DATA_ERROR;     /* and fall through */
-            case Z_DATA_ERROR:
-            case Z_MEM_ERROR:
-                (void)inflateEnd(&strm);
-                return ret;
-            }
-            have = CHUNK - strm.avail_out;
-            if (have != 0) {
-              memcpy((void*)(dest + out_pos), (void*)out, have);
-              out_pos += have;
-            }
-            //if (fwrite(out, 1, have, dest) != have || ferror(dest)) {
-            //    (void)inflateEnd(&strm);
-            //    return Z_ERRNO;
-            //}
-        } while (strm.avail_out == 0);
-
-        /* done when inflate() says it's done */
-    } while (ret != Z_STREAM_END);
-
-    /* clean up and return */
-    (void)inflateEnd(&strm);
-    *out_len = out_pos;
-    return ret == Z_STREAM_END ? Z_OK : Z_DATA_ERROR;
-}
-#endif
-
-/* report a zlib or i/o error */
-void zerr(int ret)
-{
-    fputs("zpipe: ", stderr);
-    switch (ret) {
-    case Z_ERRNO:
-        if (ferror(stdin))
-            fputs("error reading stdin\n", stderr);
-        if (ferror(stdout))
-            fputs("error writing stdout\n", stderr);
-        break;
-    case Z_STREAM_ERROR:
-        fputs("invalid compression level\n", stderr);
-        break;
-    case Z_DATA_ERROR:
-        fputs("invalid or incomplete deflate data\n", stderr);
-        break;
-    case Z_MEM_ERROR:
-        fputs("out of memory\n", stderr);
-        break;
-    case Z_VERSION_ERROR:
-        fputs("zlib version mismatch!\n", stderr);
-    }
-}
 #ifdef SDACCEL_HOST
 int
 load_file_to_memory(const char *filename, char **result)
@@ -527,13 +313,13 @@ int def259(FILE *source) {
     tmp = fread(in, 1, CHUNK, source);
     if (tmp < 0) {
         fprintf(stderr, "Failed to read input file.\n");
-        return Z_DATA_ERROR;
+        return 1;
     }
     in_len = tmp;
     FILE *fp = fopen("sam_tree.bin", "r");
     if (fp == NULL) {
         fprintf(stderr, "Failed to read tree file.\n");
-        return Z_DATA_ERROR;
+        return 1;
     }
     tree_bytes = fread(tree, 1, 512, fp);
     fprintf(stderr, "Tree bytes: %d\n", tree_bytes);
@@ -581,27 +367,14 @@ int def259(FILE *source) {
       fclose(dest);
     }
 
-#if 0
-    inf_buf(out, out_len, in_res, &in_res_len);
-    if (in_res_len != in_len) {
-      fprintf(stderr, "Output length mismatch! expected %d, got %d.\n", in_len, in_res_len);
-      return Z_DATA_ERROR;
-    }
-    for (i=0; i<in_len; i++) {
-      if (in[i] != in_res[i]) {
-        fprintf(stderr, "Byte mismatch at position %d: expected %02x, got %02x.",
-            i, in[i], in_res[i]);
-        return Z_DATA_ERROR;
-      }
-    }
-#else
+#if DO_VERIFY==1
     unsigned char out_res[CHUNK*2]; // In case we have an overflow.
     unsigned out_res_len;
 
     fp = fopen("ex1.sam.gold.def0", "r");
     if (fp == NULL) {
         fprintf(stderr, "Failed to read golden file.\n");
-        return Z_DATA_ERROR;
+        return 1;
     }
     out_res_len = fread(out_res, 1, CHUNK*2, fp);
 
@@ -611,7 +384,7 @@ int def259(FILE *source) {
     for (i=0; i<((out_res_len>out_len)?out_res_len:out_len); i++) {
       if (out[i] != out_res[i]) {
         fprintf(stderr, "Byte mismatch at position %d: expected %02x, got %02x.", i, out_res[i], out[i]);
-        return Z_DATA_ERROR;
+        return 1;
       }
     }
 
@@ -635,7 +408,7 @@ int def259(FILE *source) {
     fprintf(stderr, "Elapsed time: %f seconds\n", elapsed);
     fprintf(stderr, "Throughput: %f MB/s\n", (float)1.0*in_len/1024/1024/elapsed);
 #endif
-    return Z_OK;
+    return 0;
 }
 
 /* compress or decompress from stdin to stdout */
@@ -649,61 +422,13 @@ int main(int argc, char **argv)
     int compress = 1;
     int level;
 
-    /* avoid end-of-line conversions */
-    SET_BINARY_MODE(stdin);
-    SET_BINARY_MODE(stdout);
-
-    inFile = stdin;
-//    outFile = stdout;
-    //level = Z_DEFAULT_COMPRESSION;
-    level = Z_BEST_SPEED; 
-/*
-    for (i=1; i<argc; i++) {
-      if (strcmp(argv[i], "-d")==0) {
-        compress = 0;
-      } else if (strcmp(argv[i], "-o")==0) {
-        if (i == argc-1) {
-          fprintf(stderr, "Specify output file after -o\n");
-          exit(1);
-        }
-        outFile = fopen(argv[++i], "w");
-        if (!outFile) {
-          fprintf(stderr, "Failed to open output file '%s'!\n", argv[i]);
-          exit(1);
-        }
-      } else if (strcmp(argv[i], "-l")==0) {
-        if (i == argc-1) {
-          fprintf(stderr, "Specify compression level after -l\n");
-          exit(1);
-        }
-        level = strtol(argv[++i], 0, 10);
-        printf("Using compression level %d!\n", level);
-      } else {
-        inFile = fopen(argv[i], "r");
-        if (!inFile) {
-          fprintf(stderr, "Failed to open input file '%s'!\n", argv[i]);
-          exit(1);
-        }
-      }
-    }
-*/
-/*
-    if (argc == 2) {
-      inFile = fopen(argv[1], "r");
-      if (!inFile) {
-        fprintf(stderr, "Failed to open input file '%s'!\n", argv[1]);
-        exit(1);
-      }
-    }
-*/
     inFile = fopen("ex1.sam", "r");
     if (!inFile) {
       fprintf(stderr, "Failed to open input file '%s'!\n", argv[1]);
       exit(1);
     }
     ret = def259(inFile);
-    if (ret != Z_OK) {
-      //zerr(ret);
+    if (ret != 0) {
       printf("Test failed !!!\n");
       return 1;
     }
