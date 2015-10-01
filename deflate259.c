@@ -312,6 +312,7 @@ void deflate259(uint512* input, unsigned* in_len_p0, uint512* tree,
      }
   }
 
+#pragma HLS array partition variable=tree_b cyclic factor=4
   for (i=0; i<tree_b_count; i++)
   {
      int j;
@@ -387,7 +388,6 @@ void deflate259(uint512* input, unsigned* in_len_p0, uint512* tree,
     */
     // Bring in lookahead data if available
 
-#define LZ77
 #ifdef LZ77
     // Parallel LZ77 encoding
     match_window(data_window_c, input_pos0, in_len, larray, darray);
@@ -748,6 +748,7 @@ void deflate259(uint512* input, unsigned* in_len_p0, uint512* tree,
 #if 0
   memcpy((void*) output, (void*)output_b, output_b_count * 64);
 #else
+#pragma HLS array partition variable=output_b cyclic factor=4
   for (i=0; i<output_b_count; i++)
   {
 #pragma HLS pipeline

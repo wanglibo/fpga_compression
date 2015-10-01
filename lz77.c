@@ -369,7 +369,8 @@ void match_window(unsigned char data_window[2*VEC], unsigned input_pos,
       update[j] = current[pos][j];
     }
     if (real_pos != VEC) {
-      updates[i] = *((vec_t*)update);
+//      updates[i] = *((vec_t*)update);
+      updates[i] = chars2vec_t(update);
     } else {
       updates[i] = 0;
     }

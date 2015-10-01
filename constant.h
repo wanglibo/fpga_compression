@@ -2,13 +2,14 @@
 #define CONSTANT_H_DEFLATE
 
 #define VEC 8                        // throughput per cycle
-//#define LEN VEC                     // maximum match length
+#define LZ77
+#define BANK_OFFSETS 128
+
 #define MAX_MATCH_DIST 32768
 // Size of local buffer for prefetching; must be a multiple of VEC.
 // Also must be larger than Latency * VEC to ensure result available.
 #define MAX_OUTPUT_SIZE 64*1024-10
 #define HASH_TABLE_BANKS (VEC*2)
-#define BANK_OFFSETS 128
 #define HASH_TABLE_SIZE (BANK_OFFSETS*HASH_TABLE_BANKS)
 
 #include "ap_cint.h"
