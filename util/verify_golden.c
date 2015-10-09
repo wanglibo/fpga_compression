@@ -28,6 +28,16 @@
 #endif
 
 #define CHUNK 64*1024
+#define OUTPUT_MAX 64*1024*1024
+
+void* mallocOrDie(size_t size) {
+  void* ret = malloc(size);
+  if (!ret) {
+    fprintf(stderr, "Failed to allocate memory of size %d!\n", size);
+    exit(1);
+  }
+  return ret;
+}
 
 /* Decompress from file source to file dest until stream ends or EOF.
    inf() returns Z_OK on success, Z_MEM_ERROR if memory could not be
@@ -41,8 +51,11 @@ int inf_buf(unsigned char *source, unsigned in_len, unsigned char *dest,
     int ret;
     unsigned have;
     z_stream strm;
-    unsigned char in[CHUNK];
-    unsigned char out[CHUNK];
+    //unsigned char in[CHUNK];
+    //unsigned char out[CHUNK];
+
+    unsigned char *in = (unsigned char*)mallocOrDie(CHUNK);
+    unsigned char *out = (unsigned char*)mallocOrDie(CHUNK);
 
     /* allocate inflate state */
     strm.zalloc = Z_NULL;
@@ -147,7 +160,7 @@ int load_file_to_memory(const char *filename, char **result)
   fseek(f, 0, SEEK_END);
   size = ftell(f);
   fseek(f, 0, SEEK_SET);
-  *result = (char *)malloc(size+1);
+  *result = (char *)mallocOrDie(size+1);
   if (size != fread(*result, sizeof(char), size, f)) 
   { 
     free(*result);
@@ -180,12 +193,14 @@ int main(int argc, char** argv) {
         exit(1);
     }
 
-    int output_buf_size = 2 * CHUNK;
+    int output_buf_size = OUTPUT_MAX;
+/*
     if (input_size > CHUNK) {
         printf("Input size is larger than limit (%d), output may overflow.\n",
              CHUNK);
     }
-    output_buf = (char*)malloc(output_buf_size);
+*/
+    output_buf = (char*)mallocOrDie(output_buf_size);
     output_size = 0;
 
     test_result = inf_buf(golden_buf, golden_size, output_buf, &output_size);
