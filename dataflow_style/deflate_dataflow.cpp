@@ -104,6 +104,37 @@ uint64 uint16_to_uint64(uint16 src[4]) {
   return ret;
 }
 
+void vec_8t_to_h(uint16 h[4*VEC], vec_8t src) {
+#pragma HLS inline
+  int j;
+  for (j=0; j<4*VEC;j++) {
+    h[j] = src((j+1)*16-1, j*16);
+  }
+#pragma HLS UNROLL
+}
+
+vec_8t h_to_vec_8t(uint16 src[VEC]) {
+  int j;
+  vec_8t ret;
+#pragma HLS inline
+  for (j=0; j<4*VEC; j++) {
+#pragma HLS UNROLL
+    ret((j+1)*16-1, j*16) = src[j];
+  }
+  return ret;
+}
+
+vec_2t chars_to_vec_2t(uint8 src[VEC*2]) {
+  int j;
+  vec_2t ret;
+#pragma HLS inline
+  for (j=0; j<2*VEC; j++) {
+#pragma HLS UNROLL
+    ret((j+1)*8-1, j*8) = src[j];
+  }
+  return ret;
+}
+
 // Min with min index
 void min_reduction(uint16 input[VEC], uint16 *value, uint16 *index) {
   int i;
@@ -221,6 +252,7 @@ uint32 compute_hash(uint8 input[VEC]) {
 // Compare two strings and calculate the length of match
 uint16 calc_match_len(uint8 input[VEC], uint8 record[VEC]) {
   uint16 match_id[VEC];
+#pragma HLS inline
 #pragma HLS ARRAY_PARTITION variable=match_id complete
   uint16 i;
   for (i=0; i<VEC; i++) {
@@ -647,10 +679,7 @@ void mock_lz77(stream<vec_t> &literals, stream<vec_2t> &len,
 
 void parallel_huffman_encode(stream<vec_2t> &len, stream<vec_2t> &dist,
     stream<vec_t> &valid, int in_size, stream<uint16> &total_len,
-    stream<vec_2t> &hcode0, stream<vec_2t> &hlen0,
-    stream<vec_2t> &hcode1, stream<vec_2t> &hlen1,
-    stream<vec_2t> &hcode2, stream<vec_2t> &hlen2,
-    stream<vec_2t> &hcode3, stream<vec_2t> &hlen3) {
+    stream<vec_8t> &hcode8, stream<vec_8t> &hlen8) {
   int i, j;
 
   //cout << "Started huffman. " << endl;
@@ -722,24 +751,12 @@ void parallel_huffman_encode(stream<vec_2t> &len, stream<vec_2t> &dist,
 //    cout << "Total len: " << counter << "; ("
 //         << DIV_CEIL(counter, 8) << ")" << endl;
 
-    vec_2t hcode0_out, hlen0_out;
-    vec_2t hcode1_out, hlen1_out;
-    vec_2t hcode2_out, hlen2_out;
-    vec_2t hcode3_out, hlen3_out;
-    for (j = 0; j < VEC/4; j++) {
-      hcode0_out((j+1)*64-1, j*64) = hcode[j];
-      hcode1_out((j+1)*64-1, j*64) = hcode[VEC/4+j];
-      hcode2_out((j+1)*64-1, j*64) = hcode[2*VEC/4+j];
-      hcode3_out((j+1)*64-1, j*64) = hcode[3*VEC/4+j];
-      hlen0_out((j+1)*64-1, j*64) = hlen[j];
-      hlen1_out((j+1)*64-1, j*64) = hlen[j+VEC/4];
-      hlen2_out((j+1)*64-1, j*64) = hlen[j+2*VEC/4];
-      hlen3_out((j+1)*64-1, j*64) = hlen[j+3*VEC/4];
+    vec_8t hcode8_out, hlen8_out;
+    for (j = 0; j < VEC; j++) {
+      hcode8_out((j+1)*64-1, j*64) = hcode[j];
+      hlen8_out((j+1)*64-1, j*64) = hlen[j];
     }
-    hcode0.write(hcode0_out); hlen0.write(hlen0_out);
-    hcode1.write(hcode1_out); hlen1.write(hlen1_out);
-    hcode2.write(hcode2_out); hlen2.write(hlen2_out);
-    hcode3.write(hcode3_out); hlen3.write(hlen3_out);
+    hcode8.write(hcode8_out); hlen8.write(hlen8_out);
     total_len.write(total_len_out);
   }
 }
@@ -747,6 +764,7 @@ void parallel_huffman_encode(stream<vec_2t> &len, stream<vec_2t> &dist,
 // Perform bit packing on position i of local pack array.
 void accumulate_pos(uint32 s_pos[4*VEC], int i, int out_iter,
     uint32 hcode[VEC*4], uint16 *pack_p, uint16 *pack_next_p) {
+#pragma HLS inline
   int j;
   uint16 pack, pack_next;
   pack = 0; pack_next = 0;
@@ -786,72 +804,20 @@ void accumulate_pos(uint32 s_pos[4*VEC], int i, int out_iter,
   *pack_next_p = pack_next;
 }
 
-void write_huffman_output(uint512 *tree_buf, int tree_size_bits,
-    stream<uint16> &total_len,
-    stream<vec_2t> &hcode0, stream<vec_2t> &hlen0,
-    stream<vec_2t> &hcode1, stream<vec_2t> &hlen1,
-    stream<vec_2t> &hcode2, stream<vec_2t> &hlen2,
-    stream<vec_2t> &hcode3, stream<vec_2t> &hlen3,
-    int in_size, stream<vec_2t> &data, stream<int> &size) {
-  // Input huffman tree size in bytes
-  int out_pos = 0;
-  int i, j, out_count;
-  // The number of 64 byte batches we can write to output directly.
-  int tree_batch_count = DIV_CEIL(tree_size_bits, 512);
-  // The number of input batches
-  int in_batch_count = DIV_CEIL(in_size+1, VEC);
-
-  int bit_pos = 0;
-  vec_2t work_buf, work_buf_next, partial_out;
-
-  // Record the number of 2*VEC byte buffers wrote to out_buf.
-  out_count = 0;
-  int tree_output_lines = tree_size_bits / (VEC * 16);
-
-  // Read tree into a local buffer
-  // A huffman tree cannot exceed 64 * 4 bytes.
-  vec_2t tree_b[4*64/(2*VEC)];
-#pragma HLS array partition variable=tree_b cyclic factor=4
-  for (i=0; i<tree_batch_count; i++)
-  {
-     int j;
-#pragma HLS pipeline
-     uint512 tmp512 = tree_buf[i];
-     for (j=0; j<64/(2*VEC); j++) {
-       tree_b[(64/(2*VEC)*i+j)] =
-           tmp512((j+1)*16*VEC-1, j*16*VEC);
-     }
-  }
-
-  // Write as much as possible of the huffman tree to the output.
-  for (i=0; i<tree_output_lines; i++) {
-#pragma HLS pipeline
-    data.write(tree_b[i]);
-    size.write(-1);
-  }
-
-  if (tree_size_bits > tree_output_lines * VEC * 16) {
-    partial_out = tree_b[tree_output_lines];
-  } else {
-    partial_out = 0;
-  }
-  out_count = tree_output_lines;
-  bit_pos = tree_size_bits;
-
-  for (i = 0; i < in_batch_count; i++) {
-#pragma HLS PIPELINE II=1
-    uint32 hcode[4*VEC];
-    uint32 hlen[4*VEC];
-    uint16 zero16 = 0;
-    vec_2t hcode0_out, hlen0_out;
-    vec_2t hcode1_out, hlen1_out;
-    vec_2t hcode2_out, hlen2_out;
-    vec_2t hcode3_out, hlen3_out;
-
+void huffman_local_pack(vec_8t hcode_in, vec_8t hlen_in, int old_bit_pos, int out_count,
+    vec_2t *work_buf_out, vec_2t *work_buf_next_out) {
+#pragma HLS INLINE
     // Starting bit position of each code.
     uint32 pos[4*VEC];
     // Starting short position of each code.
     uint32 s_pos[4*VEC];
+
+    uint32 hcode[4*VEC];
+    uint32 hlen[4*VEC];
+    uint16 zero16 = 0;
+    
+    int j;
+    vec_2t work_buf = 0, work_buf_next = 0;
 
     // Compressed and packed data -- ready to send to output. Use double buffering
     // to reduce stall.
@@ -861,31 +827,9 @@ void write_huffman_output(uint512 *tree_buf, int tree_size_bits,
 #pragma HLS ARRAY_PARTITION variable=local_pack complete
     uint16 local_pack_next[VEC];
 #pragma HLS ARRAY_PARTITION variable=local_pack_next complete
-    if (total_len.empty() ||
-        hcode0.empty() || hlen0.empty() ||
-        hcode1.empty() || hlen1.empty() ||
-        hcode2.empty() || hlen2.empty() ||
-        hcode3.empty() || hlen3.empty()) {
-      i--;
-      continue;
-    }
-
-    // Load data from channels
-    hcode0.read(hcode0_out); hlen0.read(hlen0_out);
-    hcode1.read(hcode1_out); hlen1.read(hlen1_out);
-    hcode2.read(hcode2_out); hlen2.read(hlen2_out);
-    hcode3.read(hcode3_out); hlen3.read(hlen3_out);
-    uint16 total_len_current;
-    total_len.read(total_len_current);
-    for (j = 0; j < VEC; j++) {
-      hcode[j] = (zero16, hcode0_out((j+1)*16-1, j*16));
-      hcode[j+VEC] = (zero16, hcode1_out((j+1)*16-1, j*16));
-      hcode[j+2*VEC] = (zero16, hcode2_out((j+1)*16-1, j*16));
-      hcode[j+3*VEC] = (zero16, hcode3_out((j+1)*16-1, j*16));
-      hlen[j] = (zero16, hlen0_out((j+1)*16-1, j*16));
-      hlen[j+VEC] = (zero16, hlen1_out((j+1)*16-1, j*16));
-      hlen[j+2*VEC] = (zero16, hlen2_out((j+1)*16-1, j*16));
-      hlen[j+3*VEC] = (zero16, hlen3_out((j+1)*16-1, j*16));
+    for (j = 0; j < 4*VEC; j++) {
+      hcode[j] = (zero16, hcode_in((j+1)*16-1, j*16));
+      hlen[j] = (zero16, hlen_in((j+1)*16-1, j*16));
     }
 
     // Huffman packing.
@@ -899,12 +843,18 @@ void write_huffman_output(uint512 *tree_buf, int tree_size_bits,
       pos[j] = pos[j-1] + hlen[j-1];
     }
 
-    int old_bit_pos = bit_pos;
-    //int new_bit_pos = pos[4*VEC-1] + hlen[4*VEC-1] + old_bit_pos;
-    int new_bit_pos = (int)total_len_current + old_bit_pos;
-    // bit pos is the register to carry through the loop so we update immediately
-    bit_pos = new_bit_pos;
+    vec_2t pack_temp = 0;
+    vec_4t pack_shifted;
+    for (j=0; j<VEC*4; j++) {
+      vec_2t temp = hcode[j];
+      pack_temp |= temp << pos[j];
+    }
+    pack_shifted = pack_temp;
+    pack_shifted = pack_shifted << (old_bit_pos % (VEC*16));
+    work_buf = pack_shifted(VEC*16-1, 0);
+    work_buf_next = pack_shifted(VEC*32-1, VEC*16);
 
+/*
     for (j=0; j<4*VEC; j++) {
       pos[j] += old_bit_pos;
       s_pos[j] = pos[j] / 16;
@@ -929,14 +879,124 @@ void write_huffman_output(uint512 *tree_buf, int tree_size_bits,
     }
 
     // Now pack current buffers into output double buffer
-    work_buf = uint16_to_vec_2t(local_pack);
-    work_buf_next = uint16_to_vec_2t(local_pack_next);
+    *work_buf_out = uint16_to_vec_2t(local_pack);
+    *work_buf_next_out = uint16_to_vec_2t(local_pack_next);
+*/
+    *work_buf_out = work_buf;
+    *work_buf_next_out = work_buf_next;
+}
 
-    if (new_bit_pos / (VEC*16) > out_count) {
+void write_huffman_output(stream<uint16> &total_len,
+    stream<vec_8t> &hcode8, stream<vec_8t> &hlen8,
+    int in_size, stream<vec_2t> &data, stream<int> &size) {
+  // Input huffman tree size in bytes
+
+  int tree_size_bits_fixed = 640;
+/*
+  vec_2t tree_b[512/VEC/2]; // 32
+  tree_b[0] = vec_2t("F689489CCC28C9C39E75CB24A0059DED", 16);
+  tree_b[1] = vec_2t("E7AC4E57B6BD792B9EEE9869EE985CD2", 16);
+  tree_b[2] = vec_2t("999871276CB2DB12894B628D9C3B5A28", 16);
+  tree_b[3] = vec_2t("D55775554FFBE1999999999999999999", 16);
+  tree_b[4] = vec_2t("53AA61EFFBBD2B43BBB3270E7DCF4CF4", 16);
+*/
+  uint512 tree_buf[8] = {
+uint512("d55775554ffbe1999999999999999999999871276cb2db12894b628d9c3b5a28e7ac4e57b6bd792b9eee9869ee985cd2f689489ccc28c9c39e75cb24a0059ded", 16),
+uint512("00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000853aa61effbbd2b43bbb3270e7dcf4cf4", 16),
+uint512("00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000", 16),
+uint512("00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000", 16),
+uint512("00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000", 16),
+uint512("00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000", 16),
+uint512("00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000", 16),
+uint512("00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000", 16)
+};
+
+  int i, j, out_count;
+  // The number of 64 byte batches we can write to output directly.
+  int tree_batch_count = DIV_CEIL(tree_size_bits_fixed, 512);
+  // The number of input batches
+  int in_batch_count = DIV_CEIL(in_size+1, VEC);
+
+  int bit_pos = 0;
+  vec_2t partial_out;
+
+  // Record the number of 2*VEC byte buffers wrote to out_buf.
+  out_count = 0;
+  int tree_output_lines = tree_size_bits_fixed / (VEC * 16);
+
+  // Read tree into a local buffer
+  // A huffman tree cannot exceed 64 * 4 bytes.
+
+  vec_2t tree_b[4*64/(2*VEC)];
+#pragma HLS array partition variable=tree_b cyclic factor=4
+  for (i=0; i<tree_batch_count; i++)
+  {
+     int j;
+#pragma HLS pipeline
+     uint512 tmp512 = tree_buf[i];
+     for (j=0; j<64/(2*VEC); j++) {
+       tree_b[(64/(2*VEC)*i+j)] =
+           tmp512((j+1)*16*VEC-1, j*16*VEC);
+     }
+  }
+/*
+  for (i=0; i<512/(2*VEC); i++) {
+    uint8 tree_line[2*VEC];
+    for (j=0; j<2*VEC; j++) {
+      tree_line[j] = tree_b8[i*2*VEC + j];
+    }
+    tree_b[i] = chars_to_vec_2t(tree_line);
+  }
+*/
+
+  // Write as much as possible of the huffman tree to the output.
+  for (i=0; i<tree_output_lines; i++) {
+#pragma HLS pipeline
+    cout << "tree_b[i]: " << hex << tree_b[i] << dec << endl;
+    data.write(tree_b[i]);
+    size.write(-1);
+  }
+
+  if (tree_size_bits_fixed > tree_output_lines * VEC * 16) {
+    partial_out = tree_b[tree_output_lines];
+  } else {
+    partial_out = 0;
+  }
+  out_count = tree_output_lines;
+  bit_pos = tree_size_bits_fixed;
+
+  for (i = 0; i < in_batch_count; i++) {
+#pragma HLS PIPELINE II=1
+    vec_8t hcode8_out, hlen8_out;
+    vec_2t work_buf, work_buf_next;
+
+    if (total_len.empty() ||
+        hcode8.empty() || hlen8.empty()) {
+      i--;
+      continue;
+    }
+
+    // Load data from channels
+    hcode8.read(hcode8_out); hlen8.read(hlen8_out);
+    uint16 total_len_current;
+    total_len.read(total_len_current);
+
+    huffman_local_pack(hcode8_out, hlen8_out, bit_pos, out_count,
+        &work_buf, &work_buf_next);
+
+    // bit pos is the register to carry through the loop so we update immediately
+    int new_bit_pos = (int)total_len_current + bit_pos;
+    bool reached_next = (new_bit_pos / (VEC*16) > out_count);
+    bit_pos = new_bit_pos;
+
+    if (reached_next) {
+      out_count++;
+    }
+
+    if (reached_next) {
       data.write(work_buf | partial_out);
       size.write(-1);
       partial_out = work_buf_next;
-      out_count++;
     } else {
       partial_out |= work_buf;
     }
@@ -987,19 +1047,16 @@ void export_data(stream<vec_2t> &data, stream<int> &size, uint512 *out_buf,
 }
 
 extern "C" {
-void deflate259(uint512 *in_buf, int in_size, uint512* tree_buf, int tree_size,
+void deflate259(uint512 *in_buf, int in_size,
                 uint512 *out_buf, int *out_size) {
 #pragma HLS INTERFACE m_axi port=in_buf offset=slave bundle=gmem1 depth=1024
-#pragma HLS INTERFACE m_axi port=tree_buf offset=slave bundle=gmem2 depth=10
-#pragma HLS INTERFACE m_axi port=out_buf offset=slave bundle=gmem3 depth=2048
-#pragma HLS INTERFACE m_axi port=out_size offset=slave bundle=gmem4 depth=1
+#pragma HLS INTERFACE m_axi port=out_buf offset=slave bundle=gmem2 depth=2048
+#pragma HLS INTERFACE m_axi port=out_size offset=slave bundle=gmem3 depth=1
 //#pragma HLS INTERFACE s_axilite port=in_size bundle=control
 //#pragma HLS INTERFACE s_axilite port=tree_size bundle=control
 //#pragma HLS INTERFACE s_axilite port=return bundle=control
 #pragma HLS INTERFACE s_axilite port=in_buf bundle=control
 #pragma HLS INTERFACE s_axilite port=in_size bundle=control
-#pragma HLS INTERFACE s_axilite port=tree_buf bundle=control
-#pragma HLS INTERFACE s_axilite port=tree_size bundle=control
 #pragma HLS INTERFACE s_axilite port=out_buf bundle=control
 #pragma HLS INTERFACE s_axilite port=out_size bundle=control
 #pragma HLS INTERFACE s_axilite port=return bundle=control
@@ -1038,6 +1095,11 @@ void deflate259(uint512 *in_buf, int in_size, uint512* tree_buf, int tree_size,
   stream<vec_2t> hlen3("hlen3");
 #pragma HLS STREAM variable=hlen3 depth=1
 
+  stream<vec_8t> hcode8("hcode8");
+#pragma HLS STREAM variable=hcode8 depth=1
+  stream<vec_8t> hlen8("hlen8");
+#pragma HLS STREAM variable=hlen8 depth=1
+
   stream<vec_2t> data("data");
 #pragma HLS STREAM variable=data depth=1
   stream<int> size("size");
@@ -1049,8 +1111,7 @@ void deflate259(uint512 *in_buf, int in_size, uint512* tree_buf, int tree_size,
   int in_size_local = in_size;
 
   feed(in_buf, in_size_local, literals);
-
-  //mock_lz77(literals, len, dist, valid, in_size_local);
+//  mock_lz77(literals, len, dist, valid, in_size_local);
 
   hash_match(literals, in_size_local, literals_2,
       len_raw, dist_raw);
@@ -1058,12 +1119,12 @@ void deflate259(uint512 *in_buf, int in_size, uint512* tree_buf, int tree_size,
   match_selection(literals_2, len_raw, dist_raw, in_size_local,
       len, dist, valid);
 
-  parallel_huffman_encode(len, dist, valid, in_size_local, total_len,
-      hcode0, hlen0, hcode1, hlen1, hcode2, hlen2, hcode3, hlen3);
 
-  write_huffman_output(tree_buf, tree_size, total_len,
-      hcode0, hlen0, hcode1, hlen1, hcode2, hlen2, hcode3, hlen3,
-      in_size_local, data, size);
+  parallel_huffman_encode(len, dist, valid, in_size_local, total_len,
+      hcode8, hlen8);
+
+  write_huffman_output(total_len,
+      hcode8, hlen8, in_size_local, data, size);
 
   export_data(data, size, out_buf, out_size);
 }

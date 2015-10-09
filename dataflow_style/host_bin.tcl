@@ -42,19 +42,19 @@
 
 #*******************************************************************************
 # Define the project for SDAccel
-create_solution -name host_bin2 -dir . -force
+create_solution -name host_bin_hw -dir . -force
 #set_property platform vc690-admpcie7v3-1ddr-gen2 [current_project]
-add_device -vbnv xilinx:adm-pcie-7v3:1ddr:1.0
+add_device -vbnv xilinx:adm-pcie-7v3:1ddr:1.1
 
 # Host Compiler Flags
 set_property -name host_cflags -value "-g -Wall -D FPGA_DEVICE -D C_KERNEL" -objects [current_solution]
 
 # Host Source Files
-add_files "zpipe.c"
+#add_files "zpipe.c"
+add_files "opencl_tb.c"
 
 # Kernel Definition
 create_kernel deflate259 -type c
-set_property max_memory_ports true [get_kernels deflate259]
 #add_files -kernel [get_kernels deflate259] "deflate_mock.cpp"
 add_files -kernel [get_kernels deflate259] "deflate_dataflow.cpp"
 add_files -kernel [get_kernels deflate259] "huffman_translate.cpp"
@@ -66,14 +66,16 @@ create_compute_unit -opencl_binary [get_opencl_binary deflate1] -kernel [get_ker
 
 # Compile the design for CPU based emulation
 compile_emulation -flow cpu -opencl_binary [get_opencl_binary deflate1]
+#compile_emulation -flow hardware -opencl_binary [get_opencl_binary deflate1]
 
 # Run the compiled application in CPU based emulation mode
-run_emulation -flow cpu -args "deflate1.xclbin"
-#run_emulation -flow cpu
+#run_emulation -flow cpu -args "deflate1.xclbin"
+run_emulation -flow cpu
+#run_emulation -flow hardware
 
 # Compile the application to run on the accelerator card
-#build_system
+build_system
 
 # Package the application binaries
-#package_system
+package_system
 
