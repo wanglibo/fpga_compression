@@ -13,8 +13,8 @@
 #include <sys/time.h>
 #include <time.h>
 
-#define INPUT_MAX 64*1024
-#define TREE_MAX 512
+#define INPUT_MAX 64*1024*1024
+//#define INPUT_MAX 64*1024
 
 ////////////////////////////////////////////////////////////////////////////
 //
@@ -146,9 +146,14 @@ int main(int argc, char **argv)
   int ret, i;
 
   char *inFilePath = "/curr/libo/cs259/deflate_git/fpga_compression/dataflow_style/ex1.sam";
+  //char *inFilePath = "/curr/libo/cs259/deflate_git/fpga_compression/dataflow_style/vivado_hex1";
   char *outFilePath = "/curr/libo/cs259/deflate_git/fpga_compression/dataflow_style/ex1.sam.def0";
   char *treeFilePath = "/curr/libo/cs259/deflate_git/fpga_compression/dataflow_style/sam_tree.bin";
   char *goldenFilePath = "/curr/libo/cs259/deflate_git/fpga_compression/dataflow_style/ex1.sam.gold.def0";
+
+  if (argc >= 2) {
+    inFilePath = argv[1];
+  }
 
   // Prepare inputs
   char *inBuf = (char*)mallocOrDie(INPUT_MAX);
@@ -169,11 +174,15 @@ int main(int argc, char **argv)
     exit(1);
   }
 
-  printf("Deflate complete, size after compression: %d. Verifying output...\n", outSize);
+  printf("Deflate complete, size after compression: %d.\n", outSize);
 
   if (openWriteOrDie(outFilePath, outBuf, outSize) == outSize) {
     printf("Dumped compressed output successfully.\n");
   }
+
+#define DO_VERIFY
+#ifdef DO_VERIFY
+  printf("Verifying output...\n", outSize);
 
   char *goldenBuf = (char*)mallocOrDie(INPUT_MAX*2);
   goldenSize = openReadOrDie(goldenFilePath, goldenBuf, INPUT_MAX*2);
@@ -187,6 +196,7 @@ int main(int argc, char **argv)
       exit(1);
     }
   }
+#endif
 
   double elapsed = end - start;
   printf("======================\n");
@@ -358,8 +368,8 @@ int deflate259_opencl(char* input, int in_len,
   cl_mem input_arg, in_len_arg, tree_arg, tree_len_arg, output_arg, out_len_arg;
   input_arg = clCreateBuffer(context, CL_MEM_READ_ONLY, INPUT_MAX, NULL, NULL);
   in_len_arg = clCreateBuffer(context, CL_MEM_READ_ONLY, sizeof(int), NULL, NULL);
-  tree_arg = clCreateBuffer(context, CL_MEM_READ_ONLY, TREE_MAX, NULL, NULL);
-  tree_len_arg = clCreateBuffer(context, CL_MEM_READ_ONLY, sizeof(int), NULL, NULL);
+  //tree_arg = clCreateBuffer(context, CL_MEM_READ_ONLY, TREE_MAX, NULL, NULL);
+  //tree_len_arg = clCreateBuffer(context, CL_MEM_READ_ONLY, sizeof(int), NULL, NULL);
   output_arg = clCreateBuffer(context, CL_MEM_WRITE_ONLY, INPUT_MAX*2, NULL, NULL);
   out_len_arg = clCreateBuffer(context, CL_MEM_WRITE_ONLY, sizeof(int), NULL, NULL);
 
@@ -370,6 +380,8 @@ int deflate259_opencl(char* input, int in_len,
     return EXIT_FAILURE;
   }
 
+  //timespec timer = tic();
+  double tstart = get_current_msec( );
   err = clEnqueueWriteBuffer(commands, input_arg, CL_TRUE, 0, in_len, input, 0, NULL, NULL);
   if (err != CL_SUCCESS)
   {
@@ -377,7 +389,7 @@ int deflate259_opencl(char* input, int in_len,
     printf("Test failed\n");
     return EXIT_FAILURE;
   }
-  printf("Written source array input!\n");
+  //printf("Written source array input!\n");
 
   err = clEnqueueWriteBuffer(commands, in_len_arg, CL_TRUE, 0, sizeof(int), &in_len, 0, NULL, NULL);
   if (err != CL_SUCCESS)
@@ -386,7 +398,7 @@ int deflate259_opencl(char* input, int in_len,
     printf("Test failed\n");
     return EXIT_FAILURE;
   }
-  printf("Written in_len = %d\n", in_len);
+  //printf("Written in_len = %d\n", in_len);
 /*
   err = clEnqueueWriteBuffer(commands, tree_arg, CL_TRUE, 0, TREE_MAX, tree, 0, NULL, NULL);
   if (err != CL_SUCCESS)
@@ -422,14 +434,16 @@ int deflate259_opencl(char* input, int in_len,
     printf("Test failed\n");
     return EXIT_FAILURE;
   }
-  printf("Set arguments. Executing kernel!\n");
+  //printf("Set arguments. Executing kernel!\n");
 
   // Execute the kernel over the entire range of our 1d input data set
   // using the maximum number of work group items for this device
   //
+  //toc_wrbuf(&timer);
 
 #ifdef C_KERNEL
   err = clEnqueueTask(commands, kernel, 0, NULL, NULL);
+//  err = clEnqueueTask(commands, kernel, 0, NULL, NULL);
 #else
   size_t global[1];
   size_t local[1];
@@ -438,7 +452,7 @@ int deflate259_opencl(char* input, int in_len,
   err = clEnqueueNDRangeKernel(commands, kernel, 1, NULL, 
                                (size_t*)&global, (size_t*)&local, 0, NULL, NULL);
 #endif
-  printf("Scheduled kernel!\n");
+  //printf("Scheduled kernel!\n");
   if (err)
   {
     printf("Error: Failed to execute kernel! %d\n", err);
@@ -461,7 +475,7 @@ int deflate259_opencl(char* input, int in_len,
   clWaitForEvents(1, &readevent);
   *out_len = out_len_b;
 
-  printf("Read final output length: %d\n", out_len_b);
+  //printf("Read final output length: %d\n", out_len_b);
   if (out_len_b < 0) {
     return EXIT_FAILURE;
   }
@@ -473,8 +487,15 @@ int deflate259_opencl(char* input, int in_len,
     printf("Test failed\n");
     return EXIT_FAILURE;
   }
+  //toc(&timer);
   clWaitForEvents(1, &readevent);
+  double tend = get_current_msec( );
   printf("Read output buffer!\n");
+  double elapsed = tend - tstart;
+  printf("======================\n");
+  printf("Elapsed time: %f ms\n", elapsed);
+  printf("Throughput: %f MB/s\n",
+      (double)1000.0*in_len/1024/1024/elapsed);
   return 0;
 }
 

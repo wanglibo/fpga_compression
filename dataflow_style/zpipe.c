@@ -13,8 +13,8 @@
 #endif
 
 #include "ap_cint.h"
-void deflate259(uint512 *in_buf, int in_size, uint512* tree_buf,
-                int tree_size, uint512 *out_buf, int *out_size);
+void deflate259(uint512 *in_buf, int in_size,
+                uint512 *out_buf, int *out_size);
 
 #define CHUNK 64*1024
 
@@ -300,29 +300,6 @@ int deflate259_opencl(unsigned char* input, unsigned in_len, unsigned char* tree
 }
 #endif // #ifdef SDACCEL_HOST
 
-union char_512 {
-  uint512 wide;
-  unsigned char content[64];
-};
-
-typedef union char_512 char_512_t;
-
-void prepare_input(unsigned char* in_hw, unsigned char* in,
-     int in_size) {
-  int i;
-  for (i=0; i<in_size; i++) {
-    in_hw[i] = in[i];
-  }
-}
-
-void prepare_output(unsigned char* out_hw, unsigned char* out,
-    int out_size) {
-  int i;
-  for (i=0; i<out_size; i++) {
-    out[i] = out_hw[i];
-  }
-}
-
 // Tester
 int def259(FILE *source) {
     unsigned char in[CHUNK];
@@ -386,7 +363,7 @@ int def259(FILE *source) {
     //deflate259(in_hw, in_len, tree_hw, tree_len, out_hw, &out_len);
 
     //prepare_output((unsigned char*)out_hw, out, out_len);
-    deflate259(in, in_len, tree, tree_len, out, &out_len);
+    deflate259(in, in_len, out, &out_len);
 /*    for (i = 0; i < CHUNK*2/64; i++) {
         char_512_t tmp;
         tmp.wide = out_hw[i];

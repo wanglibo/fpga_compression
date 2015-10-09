@@ -20,7 +20,7 @@ set_top ${top}
 
 open_solution solution1
 set_part xc7vx690tffg1157-2
-create_clock -period 6ns
+create_clock -period 5ns
 
 csim_design
 

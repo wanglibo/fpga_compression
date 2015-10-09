@@ -11,10 +11,7 @@
 // Parallelism
 #define VEC 8
 // Match window size: must be a multiple of VEC
-#define LEN 16
-#if LEN%VEC != 0
-#error "LEN must be a multiple of VEC."
-#endif
+
 #define MAX_MATCH_DIST 32768
 #define BANK_OFFSETS 128
 #define HASH_TABLE_BANKS (VEC*2)
@@ -23,8 +20,6 @@
 #if VEC!=8 && VEC!=16 && VEC!=32
 #error "VEC must be 8, 16 or 32!"
 #endif
-
-typedef ap_uint<LEN*8> len_t;
 
 typedef ap_uint<VEC*8> vec_t;
 typedef ap_uint<VEC*16> vec_2t;

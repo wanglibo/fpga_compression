@@ -108,9 +108,9 @@ void vec_8t_to_h(uint16 h[4*VEC], vec_8t src) {
 #pragma HLS inline
   int j;
   for (j=0; j<4*VEC;j++) {
+#pragma HLS UNROLL
     h[j] = src((j+1)*16-1, j*16);
   }
-#pragma HLS UNROLL
 }
 
 vec_8t h_to_vec_8t(uint16 src[VEC]) {
@@ -292,11 +292,13 @@ void hash_match(stream<vec_t> &data_window, int in_size,
 
   // Reset hash table
   for (i=0; i<BANK_OFFSETS; i++) {
+#pragma HLS PIPELINE
     for (j=0; j<HASH_TABLE_BANKS; j++) {
       hash_valid[i][j] = 0;
     }
   }
-  for (i = 0; i < BANK_OFFSETS; i++) {
+  for (i = 0; i < HASH_TABLE_BANKS; i++) {
+#pragma HLS UNROLL
     prev_hash_valid[i] = 0;
   }
 
